@@ -26,8 +26,9 @@ import (
 	"go.opentelemetry.io/contrib"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
-	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
@@ -39,6 +40,10 @@ type Consumer struct {
 	tracer          oteltrace.Tracer
 	propagator      propagation.TextMapPropagator
 	consumerGroupID string
+	metric          metric.Meter
+	metrics         struct {
+		messageCounter metric.Int64Counter
+	}
 }
 
 func NewConsumerWithTracing(consumer *kafka.Consumer, opts ...Option) *Consumer {
@@ -52,7 +57,7 @@ func NewConsumerWithTracing(consumer *kafka.Consumer, opts ...Option) *Consumer 
 		o.apply(cfg)
 	}
 
-	return &Consumer{
+	c := &Consumer{
 		Consumer: consumer,
 		ctx:      context.Background(),
 		tracer: cfg.tracerProvider.Tracer(
@@ -60,25 +65,35 @@ func NewConsumerWithTracing(consumer *kafka.Consumer, opts ...Option) *Consumer 
 			oteltrace.WithInstrumentationVersion(contrib.SemVersion()),
 		),
 		propagator:      cfg.propagator,
+		metric:          otel.Meter(cfg.tracerName),
 		consumerGroupID: cfg.consumerGroupID,
 	}
+
+	c.metrics.messageCounter, _ = c.metric.Int64Counter(
+		"kafka.consumed.message",
+		metric.WithUnit("1"),
+		metric.WithDescription("Message consumed by topic"),
+	)
+	return c
+
 }
 
 func (c *Consumer) attrsByOperationAndMessage(operation internal.Operation, msg *kafka.Message) []attribute.KeyValue {
 	attributes := []attribute.KeyValue{
-		internal.KafkaSystemKey(),
-		internal.KafkaOperation(operation),
-		internal.KafkaConsumerGroupID(c.consumerGroupID),
-		semconv.MessagingDestinationKindTopic,
+		semconv.MessagingSystemKafka,
+		semconv.MessagingKafkaConsumerGroup(c.consumerGroupID),
+		semconv.MessagingOperationName("poll"),
+		semconv.MessagingOperationTypeReceive,
 	}
 
 	if msg != nil {
-		attributes = append(attributes, internal.KafkaMessageKey(string(msg.Key)))
+		attributes = append(attributes, semconv.MessagingKafkaMessageKey(string(msg.Key)))
 		attributes = append(attributes, internal.KafkaMessageHeaders(msg.Headers)...)
-		attributes = append(attributes, semconv.MessagingKafkaPartitionKey.Int(int(msg.TopicPartition.Partition)))
+		attributes = append(attributes, semconv.MessagingDestinationPartitionIDKey.Int(int(msg.TopicPartition.Partition)))
+		attributes = append(attributes, semconv.MessagingKafkaMessageOffset(int(msg.TopicPartition.Offset)))
 
 		if topic := msg.TopicPartition.Topic; topic != nil {
-			attributes = append(attributes, internal.KafkaDestinationTopic(*topic))
+			attributes = append(attributes, semconv.MessagingDestinationName(*topic))
 		}
 	}
 
@@ -102,6 +117,15 @@ func (c *Consumer) startSpan(operationName internal.Operation, msg *kafka.Messag
 	return span, ctx
 }
 
+func (c *Consumer) metricHandle(msg *kafka.Message) {
+
+	attributes := []attribute.KeyValue{attribute.String("topic", *msg.TopicPartition.Topic),
+		attribute.Int64("partition", int64(msg.TopicPartition.Partition))}
+
+	c.metrics.messageCounter.Add(context.Background(), 1, metric.WithAttributes(attributes...))
+
+}
+
 // ReadMessage creates a new span and reads a Kafka message from current consumer.
 func (c *Consumer) ReadMessage(timeout time.Duration) (*kafka.Message, error) {
 	msg, err := c.Consumer.ReadMessage(timeout)
@@ -121,6 +145,7 @@ func (c *Consumer) ReadMessageWithHandler(timeout time.Duration, handler Consume
 	if msg != nil {
 		s, ctx := c.startSpan(internal.OperationConsume, msg)
 		err = handler(c.Consumer, msg, ctx)
+		c.metricHandle(msg)
 		endSpan(s, err)
 	}
 

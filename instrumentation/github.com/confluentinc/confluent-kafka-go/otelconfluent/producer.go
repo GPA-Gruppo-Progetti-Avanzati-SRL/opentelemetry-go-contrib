@@ -28,7 +28,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
-	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
@@ -69,7 +69,7 @@ func NewProducerWithTracing(producer *kafka.Producer, opts ...Option) *Producer 
 	}
 
 	p.metrics.messageCounter, _ = p.metric.Int64Counter(
-		"kafka.message.count",
+		"kafka.producer.message",
 		metric.WithUnit("1"),
 		metric.WithDescription("Sended message count"),
 	)
@@ -116,18 +116,18 @@ func (p *Producer) Events() chan kafka.Event {
 
 func (p *Producer) attrsByOperationAndMessage(operation internal.Operation, msg *kafka.Message) []attribute.KeyValue {
 	attributes := []attribute.KeyValue{
-		internal.KafkaSystemKey(),
-		internal.KafkaOperation(operation),
-		semconv.MessagingDestinationKindTopic,
+		semconv.MessagingSystemKafka,
+		semconv.MessagingOperationName("send"),
+		semconv.MessagingOperationTypePublish,
 	}
 
 	if msg != nil {
 		attributes = append(attributes, internal.KafkaMessageKey(string(msg.Key)))
 		attributes = append(attributes, internal.KafkaMessageHeaders(msg.Headers)...)
-		attributes = append(attributes, semconv.MessagingKafkaPartitionKey.Int(int(msg.TopicPartition.Partition)))
+		attributes = append(attributes, semconv.MessagingDestinationPartitionIDKey.Int(int(msg.TopicPartition.Partition)))
 
 		if topic := msg.TopicPartition.Topic; topic != nil {
-			attributes = append(attributes, internal.KafkaDestinationTopic(*topic))
+			attributes = append(attributes, semconv.MessagingDestinationName(*topic))
 		}
 	}
 
