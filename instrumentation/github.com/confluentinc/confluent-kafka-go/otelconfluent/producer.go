@@ -26,6 +26,7 @@ import (
 	"go.opentelemetry.io/contrib"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
@@ -37,6 +38,11 @@ type Producer struct {
 	propagator propagation.TextMapPropagator
 	spans      *sync.Map
 	events     chan kafka.Event
+	metric     metric.Meter
+	metrics    struct {
+		messageCounter  metric.Int64Counter
+		producedLatency metric.Int64Histogram
+	}
 }
 
 func NewProducerWithTracing(producer *kafka.Producer, opts ...Option) *Producer {
@@ -56,10 +62,22 @@ func NewProducerWithTracing(producer *kafka.Producer, opts ...Option) *Producer 
 			cfg.tracerName,
 			oteltrace.WithInstrumentationVersion(contrib.SemVersion()),
 		),
+		metric:     otel.Meter(cfg.tracerName),
 		propagator: cfg.propagator,
 		spans:      &sync.Map{},
 		events:     make(chan kafka.Event, cap(producer.Events())),
 	}
+
+	p.metrics.messageCounter, _ = p.metric.Int64Counter(
+		"kafka.message.count",
+		metric.WithUnit("1"),
+		metric.WithDescription("Sended message count"),
+	)
+
+	p.metrics.producedLatency, _ = p.metric.Int64Histogram(
+		"kafka.produced.latency",
+		metric.WithUnit("ms"),
+	)
 
 	go p.listenEvents()
 
@@ -140,6 +158,14 @@ func (p *Producer) Produce(msg *kafka.Message, ctx context.Context, deliveryChan
 	s := p.startSpan(internal.OperationProduce, msg, ctx)
 	err := p.Producer.Produce(msg, deliveryChan)
 	endSpan(s, err)
+
+	attributes := []attribute.KeyValue{attribute.String("topic", *msg.TopicPartition.Topic)}
+
+	if err != nil {
+		attributes = append(attributes, attribute.Bool("error", true))
+	}
+
+	p.metrics.messageCounter.Add(context.Background(), 1, metric.WithAttributes(attributes...))
 	return err
 }
 
