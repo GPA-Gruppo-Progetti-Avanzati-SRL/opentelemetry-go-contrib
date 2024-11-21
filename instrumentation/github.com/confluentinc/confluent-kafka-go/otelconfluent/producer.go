@@ -20,8 +20,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent/internal"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/etf1/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent/internal"
 
 	"go.opentelemetry.io/contrib"
 	"go.opentelemetry.io/otel"
@@ -33,7 +33,6 @@ import (
 
 type Producer struct {
 	*kafka.Producer
-	ctx        context.Context
 	tracer     oteltrace.Tracer
 	propagator propagation.TextMapPropagator
 	spans      *sync.Map
@@ -53,7 +52,6 @@ func NewProducerWithTracing(producer *kafka.Producer, opts ...Option) *Producer 
 
 	p := &Producer{
 		Producer: producer,
-		ctx:      context.Background(),
 		tracer: cfg.tracerProvider.Tracer(
 			cfg.tracerName,
 			oteltrace.WithInstrumentationVersion(contrib.SemVersion()),
@@ -118,13 +116,14 @@ func (p *Producer) attrsByOperationAndMessage(operation internal.Operation, msg 
 	return attributes
 }
 
-func (p *Producer) startSpan(operationName internal.Operation, msg *kafka.Message) oteltrace.Span {
+func (p *Producer) startSpan(operationName internal.Operation, msg *kafka.Message, ctx context.Context) oteltrace.Span {
 	opts := []oteltrace.SpanStartOption{
 		oteltrace.WithSpanKind(oteltrace.SpanKindProducer),
 	}
 
 	carrier := NewMessageCarrier(msg)
-	ctx := p.propagator.Extract(p.ctx, carrier)
+
+	ctx = p.propagator.Extract(ctx, carrier)
 
 	ctx, span := p.tracer.Start(ctx, string(operationName), opts...)
 
@@ -137,33 +136,11 @@ func (p *Producer) startSpan(operationName internal.Operation, msg *kafka.Messag
 
 // Produce creates a new span and produces the given Kafka message synchronously
 // using the original producer.
-func (p *Producer) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
-	s := p.startSpan(internal.OperationProduce, msg)
+func (p *Producer) Produce(msg *kafka.Message, ctx context.Context, deliveryChan chan kafka.Event) error {
+	s := p.startSpan(internal.OperationProduce, msg, ctx)
 	err := p.Producer.Produce(msg, deliveryChan)
 	endSpan(s, err)
 	return err
-}
-
-// ProduceChannel creates a new span for every messages sent into the channel and
-// forwards to the original producer channel.
-func (p *Producer) ProduceChannel() chan *kafka.Message {
-	wrappedProduceChannel := make(chan *kafka.Message, 0)
-
-	go func() {
-		for msg := range wrappedProduceChannel {
-			s := p.startSpan(internal.OperationProduce, msg)
-
-			// Store span identifier in message in order to retrieve it later when
-			// events will confirm that it is produced to the brokers.
-			spanID := s.SpanContext().SpanID().String()
-			msg.Opaque = spanID
-			p.spans.Store(spanID, s)
-
-			p.Producer.ProduceChannel() <- msg
-		}
-	}()
-
-	return wrappedProduceChannel
 }
 
 func (p *Producer) Close() {

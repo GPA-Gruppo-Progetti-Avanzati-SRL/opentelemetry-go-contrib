@@ -20,8 +20,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent/internal"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
-	"github.com/etf1/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent/internal"
 
 	"go.opentelemetry.io/contrib"
 	"go.opentelemetry.io/otel"
@@ -31,7 +31,7 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
-type ConsumeFunc func(consumer *kafka.Consumer, msg *kafka.Message) error
+type ConsumeFunc func(consumer *kafka.Consumer, msg *kafka.Message, ctx context.Context) error
 
 type Consumer struct {
 	*kafka.Consumer
@@ -85,7 +85,7 @@ func (c *Consumer) attrsByOperationAndMessage(operation internal.Operation, msg 
 	return attributes
 }
 
-func (c *Consumer) startSpan(operationName internal.Operation, msg *kafka.Message) oteltrace.Span {
+func (c *Consumer) startSpan(operationName internal.Operation, msg *kafka.Message) (oteltrace.Span, context.Context) {
 	opts := []oteltrace.SpanStartOption{
 		oteltrace.WithSpanKind(oteltrace.SpanKindConsumer),
 	}
@@ -99,7 +99,7 @@ func (c *Consumer) startSpan(operationName internal.Operation, msg *kafka.Messag
 
 	span.SetAttributes(c.attrsByOperationAndMessage(operationName, msg)...)
 
-	return span
+	return span, ctx
 }
 
 // ReadMessage creates a new span and reads a Kafka message from current consumer.
@@ -107,7 +107,7 @@ func (c *Consumer) ReadMessage(timeout time.Duration) (*kafka.Message, error) {
 	msg, err := c.Consumer.ReadMessage(timeout)
 
 	if msg != nil {
-		s := c.startSpan(internal.OperationConsume, msg)
+		s, _ := c.startSpan(internal.OperationConsume, msg)
 		endSpan(s, err)
 	}
 
@@ -119,8 +119,8 @@ func (c *Consumer) ReadMessageWithHandler(timeout time.Duration, handler Consume
 	msg, err := c.Consumer.ReadMessage(timeout)
 
 	if msg != nil {
-		s := c.startSpan(internal.OperationConsume, msg)
-		err = handler(c.Consumer, msg)
+		s, ctx := c.startSpan(internal.OperationConsume, msg)
+		err = handler(c.Consumer, msg, ctx)
 		endSpan(s, err)
 	}
 
@@ -136,7 +136,7 @@ func (c *Consumer) Poll(timeoutMs int) kafka.Event {
 	case *kafka.Message:
 		msg := ev
 		if msg != nil {
-			s := c.startSpan(internal.OperationConsume, msg)
+			s, _ := c.startSpan(internal.OperationConsume, msg)
 			endSpan(s, nil)
 		}
 	}
@@ -153,8 +153,8 @@ func (c *Consumer) PollWithHandler(timeoutMs int, handler ConsumeFunc) kafka.Eve
 	case *kafka.Message:
 		msg := ev
 		if msg != nil {
-			s := c.startSpan(internal.OperationConsume, msg)
-			err := handler(c.Consumer, msg)
+			s, ctx := c.startSpan(internal.OperationConsume, msg)
+			err := handler(c.Consumer, msg, ctx)
 			endSpan(s, err)
 		}
 	}

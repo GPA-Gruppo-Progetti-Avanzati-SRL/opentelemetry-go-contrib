@@ -23,7 +23,7 @@ import (
 
 const (
 	// tracerName is the technical name of the tracer.
-	tracerName = "github.com/etf1/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent"
+	tracerName = "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent"
 )
 
 func endSpan(s oteltrace.Span, err error) {

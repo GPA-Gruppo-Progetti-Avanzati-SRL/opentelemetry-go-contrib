@@ -17,6 +17,7 @@
 package otelconfluent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -80,34 +81,10 @@ func TestProducer_Produce(t *testing.T) {
 	deliveryChan := make(chan kafka.Event)
 
 	// When
-	err = producer.Produce(message, deliveryChan)
+	err = producer.Produce(message, context.Background(), deliveryChan)
 
 	// Then
 	assert.Nil(t, err)
 
-	assert.Nil(t, message.Headers)
-}
-
-func TestProducer_ProduceChannel(t *testing.T) {
-	// Given
-	provider := trace.NewNoopTracerProvider()
-
-	confluentProducer, err := kafka.NewProducer(&kafka.ConfigMap{})
-	require.NoError(t, err)
-
-	producer := NewProducerWithTracing(confluentProducer, WithTracerProvider(provider))
-
-	message := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
-			Topic: &topic,
-		},
-		Key:   []byte("test-key"),
-		Value: []byte("test-value"),
-	}
-
-	// When
-	producer.ProduceChannel() <- message
-
-	// Then
 	assert.Nil(t, message.Headers)
 }

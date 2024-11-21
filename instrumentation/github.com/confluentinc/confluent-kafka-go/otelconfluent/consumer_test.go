@@ -17,6 +17,7 @@
 package otelconfluent
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -108,7 +109,7 @@ func TestConsumer_ReadMessageWithHandler(t *testing.T) {
 
 	consumer := NewConsumerWithTracing(confluentConsumer, WithTracerProvider(provider))
 
-	handler := func(consumer *kafka.Consumer, msg *kafka.Message) error {
+	handler := func(consumer *kafka.Consumer, msg *kafka.Message, ctx context.Context) error {
 		// Nothing to do here...
 		return nil
 	}
@@ -133,7 +134,7 @@ func TestConsumer_PollWithHandler(t *testing.T) {
 
 	consumer := NewConsumerWithTracing(confluentConsumer, WithTracerProvider(provider))
 
-	handler := func(consumer *kafka.Consumer, msg *kafka.Message) error {
+	handler := func(consumer *kafka.Consumer, msg *kafka.Message, ctx context.Context) error {
 		// Nothing to do here...
 		return nil
 	}

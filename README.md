@@ -1,6 +1,5 @@
 # OpenTelemetry Go Contributions
 
-[![Test](https://github.com/etf1/opentelemetry-go-contrib/actions/workflows/master.yml/badge.svg)](https://github.com/etf1/opentelemetry-go-contrib/actions/workflows/master.yml)
 
 ## About
 

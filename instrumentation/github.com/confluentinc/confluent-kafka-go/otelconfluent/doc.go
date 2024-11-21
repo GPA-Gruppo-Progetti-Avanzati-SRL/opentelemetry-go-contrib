@@ -22,4 +22,4 @@
 // The instrumentation works by wrapping the kafka producer or consumer by calling
 // `NewProducerWithTracing` or `NewConsumerWithTracing` and tracing it's every operation.
 
-package otelconfluent // import "github.com/etf1/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent"
+package otelconfluent // import "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent"
