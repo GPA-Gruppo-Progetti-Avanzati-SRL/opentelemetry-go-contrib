@@ -18,7 +18,6 @@ package otelconfluent
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent/internal"
@@ -78,7 +77,6 @@ func NewConsumerWithTracing(consumer *kafka.Consumer, opts ...Option) *Consumer 
 }
 
 func (c *Consumer) handleStats(stats string) {
-	fmt.Println(stats)
 	c.metrics.stats.SetLastReport(stats)
 }
 
