@@ -18,9 +18,11 @@ package otelconfluent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent/internal"
+	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent/stats"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 
 	"go.opentelemetry.io/contrib"
@@ -42,7 +44,7 @@ type Consumer struct {
 	consumerGroupID string
 	metric          metric.Meter
 	metrics         struct {
-		messageCounter metric.Int64Counter
+		stats *stats.ConsumerStatsMetric
 	}
 }
 
@@ -69,13 +71,15 @@ func NewConsumerWithTracing(consumer *kafka.Consumer, opts ...Option) *Consumer 
 		consumerGroupID: cfg.consumerGroupID,
 	}
 
-	c.metrics.messageCounter, _ = c.metric.Int64Counter(
-		"kafka.consumed.message",
-		metric.WithUnit("1"),
-		metric.WithDescription("Message consumed by topic"),
-	)
+	c.metrics.stats = stats.NewConsumerStatsMetrics(c.metric)
+
 	return c
 
+}
+
+func (c *Consumer) handleStats(stats string) {
+	fmt.Println(stats)
+	c.metrics.stats.SetLastReport(stats)
 }
 
 func (c *Consumer) attrsByOperationAndMessage(operation internal.Operation, msg *kafka.Message) []attribute.KeyValue {
@@ -117,16 +121,7 @@ func (c *Consumer) startSpan(operationName internal.Operation, msg *kafka.Messag
 	return span, ctx
 }
 
-func (c *Consumer) metricHandle(msg *kafka.Message) {
-
-	attributes := []attribute.KeyValue{attribute.String("topic", *msg.TopicPartition.Topic),
-		attribute.Int64("partition", int64(msg.TopicPartition.Partition))}
-
-	c.metrics.messageCounter.Add(context.Background(), 1, metric.WithAttributes(attributes...))
-
-}
-
-// ReadMessage creates a new span and reads a Kafka message from current consumer.
+// ReadMessage creates a new span and reads a Kafka message from current consumer. NO metrics.
 func (c *Consumer) ReadMessage(timeout time.Duration) (*kafka.Message, error) {
 	msg, err := c.Consumer.ReadMessage(timeout)
 
@@ -138,14 +133,13 @@ func (c *Consumer) ReadMessage(timeout time.Duration) (*kafka.Message, error) {
 	return msg, err
 }
 
-// ReadMessageWithHandler reads a message and runs the given handler by tracing it.
+// ReadMessageWithHandler reads a message and runs the given handler by tracing it. NO metrics.
 func (c *Consumer) ReadMessageWithHandler(timeout time.Duration, handler ConsumeFunc) (*kafka.Message, error) {
 	msg, err := c.Consumer.ReadMessage(timeout)
 
 	if msg != nil {
 		s, ctx := c.startSpan(internal.OperationConsume, msg)
 		err = handler(c.Consumer, msg, ctx)
-		c.metricHandle(msg)
 		endSpan(s, err)
 	}
 
@@ -164,6 +158,9 @@ func (c *Consumer) Poll(timeoutMs int) kafka.Event {
 			s, _ := c.startSpan(internal.OperationConsume, msg)
 			endSpan(s, nil)
 		}
+
+	case *kafka.Stats:
+		c.handleStats(ev.String())
 	}
 
 	return event
@@ -182,6 +179,9 @@ func (c *Consumer) PollWithHandler(timeoutMs int, handler ConsumeFunc) kafka.Eve
 			err := handler(c.Consumer, msg, ctx)
 			endSpan(s, err)
 		}
+
+	case *kafka.Stats:
+		c.handleStats(ev.String())
 	}
 
 	return event

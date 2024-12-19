@@ -19,8 +19,10 @@ package otelconfluent
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent/internal"
+	"github.com/GPA-Gruppo-Progetti-Avanzati-SRL/opentelemetry-go-contrib/instrumentation/github.com/confluentinc/confluent-kafka-go/otelconfluent/stats"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 
 	"go.opentelemetry.io/contrib"
@@ -40,8 +42,8 @@ type Producer struct {
 	events     chan kafka.Event
 	metric     metric.Meter
 	metrics    struct {
-		messageCounter  metric.Int64Counter
 		producedLatency metric.Int64Histogram
+		stats           *stats.ProducerStatsMetric
 	}
 }
 
@@ -60,7 +62,7 @@ func NewProducerWithTracing(producer *kafka.Producer, opts ...Option) *Producer 
 		Producer: producer,
 		tracer: cfg.tracerProvider.Tracer(
 			cfg.tracerName,
-			oteltrace.WithInstrumentationVersion(contrib.SemVersion()),
+			oteltrace.WithInstrumentationVersion(contrib.Version()),
 		),
 		metric:     otel.Meter(cfg.tracerName),
 		propagator: cfg.propagator,
@@ -68,15 +70,11 @@ func NewProducerWithTracing(producer *kafka.Producer, opts ...Option) *Producer 
 		events:     make(chan kafka.Event, cap(producer.Events())),
 	}
 
-	p.metrics.messageCounter, _ = p.metric.Int64Counter(
-		"kafka.producer.message",
-		metric.WithUnit("1"),
-		metric.WithDescription("Sended message count"),
-	)
+	p.metrics.stats = stats.NewProducerStatsMetrics(p.metric)
 
 	p.metrics.producedLatency, _ = p.metric.Int64Histogram(
 		"kafka.produced.latency",
-		metric.WithUnit("ms"),
+		metric.WithUnit("us"),
 	)
 
 	go p.listenEvents()
@@ -105,8 +103,12 @@ func (p *Producer) listenEvents() {
 				span := s.(oteltrace.Span)
 				endSpan(span, msg.TopicPartition.Error)
 			}
+
+		case *kafka.Stats:
+			p.metrics.stats.SetLastReport(ev.String())
 		}
 	}
+
 }
 
 // Events returns the channel events
@@ -156,7 +158,10 @@ func (p *Producer) startSpan(operationName internal.Operation, msg *kafka.Messag
 // using the original producer.
 func (p *Producer) Produce(msg *kafka.Message, ctx context.Context, deliveryChan chan kafka.Event) error {
 	s := p.startSpan(internal.OperationProduce, msg, ctx)
+	startTime := time.Now()
 	err := p.Producer.Produce(msg, deliveryChan)
+	timeElasped := time.Since(startTime).Microseconds()
+
 	endSpan(s, err)
 
 	attributes := []attribute.KeyValue{attribute.String("topic", *msg.TopicPartition.Topic)}
@@ -165,7 +170,8 @@ func (p *Producer) Produce(msg *kafka.Message, ctx context.Context, deliveryChan
 		attributes = append(attributes, attribute.Bool("error", true))
 	}
 
-	p.metrics.messageCounter.Add(context.Background(), 1, metric.WithAttributes(attributes...))
+	p.metrics.producedLatency.Record(ctx, timeElasped, metric.WithAttributes(attributes...))
+
 	return err
 }
 
