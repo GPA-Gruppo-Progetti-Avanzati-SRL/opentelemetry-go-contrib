@@ -19,12 +19,13 @@ type BrokerStatsMetrics struct {
 	TotalResponsesReceived metric.Int64ObservableCounter
 	TotalBytesSent         metric.Int64ObservableCounter
 	TotalBytesReceived     metric.Int64ObservableCounter
-	StateAge               metric.Int64Gauge
+	StateAge               metric.Int64ObservableGauge
 	Rtt                    WindowMetrics
 }
 
 func (m *BrokerStatsMetrics) MetricsToObserve() []metric.Observable {
-	metricsToObserve := []metric.Observable{m.TotalBytesReceived, m.TotalBytesSent,
+	metricsToObserve := []metric.Observable{
+		m.TotalBytesReceived, m.TotalBytesSent, m.TrasmisionError, m.StateAge,
 		m.TotalResponsesReceived, m.TotalRequestsSent, m.Status, m.ReceiveError, m.Connect, m.Disconnect}
 
 	metricsToObserve = append(metricsToObserve, m.Rtt.MetricsToObserve()...)
@@ -59,7 +60,7 @@ func newSharedBrokerStatsMetrics(meter metric.Meter) BrokerStatsMetrics {
 		metric.WithDescription("Total number of bytes received from Kafka brokers"),
 	)
 
-	sharedBrokerMetrics.StateAge, _ = meter.Int64Gauge(
+	sharedBrokerMetrics.StateAge, _ = meter.Int64ObservableGauge(
 		"kafka.broker.stats.state.age",
 		metric.WithUnit("{microseconds}"),
 		metric.WithDescription("Time since last broker state change"),
@@ -115,8 +116,7 @@ func (sharedBrokerMetrics *BrokerStatsMetrics) HandleMetrics(ctx context.Context
 		brokerAttributes = append(brokerAttributes, commonAttributes...)
 		attributes := metric.WithAttributeSet(attribute.NewSet(brokerAttributes...))
 
-		sharedBrokerMetrics.StateAge.Record(ctx, brokerData.Stateage, attributes)
-
+		o.ObserveInt64(sharedBrokerMetrics.StateAge, brokerData.Stateage, attributes)
 		o.ObserveInt64(sharedBrokerMetrics.Connect, brokerData.Connect, attributes)
 		o.ObserveInt64(sharedBrokerMetrics.Disconnect, brokerData.Disconnects, attributes)
 
