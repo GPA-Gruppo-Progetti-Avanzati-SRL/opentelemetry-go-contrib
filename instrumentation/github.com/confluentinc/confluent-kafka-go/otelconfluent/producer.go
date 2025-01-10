@@ -39,7 +39,6 @@ type Producer struct {
 	tracer     oteltrace.Tracer
 	propagator propagation.TextMapPropagator
 	spans      *sync.Map
-	events     chan kafka.Event
 	metric     metric.Meter
 	metrics    struct {
 		producedLatency metric.Int64Histogram
@@ -67,7 +66,6 @@ func NewProducerWithTracing(producer *kafka.Producer, opts ...Option) *Producer 
 		metric:     otel.Meter(cfg.tracerName),
 		propagator: cfg.propagator,
 		spans:      &sync.Map{},
-		events:     make(chan kafka.Event, cap(producer.Events())),
 	}
 
 	p.metrics.stats = stats.NewProducerStatsMetrics(p.metric)
@@ -84,7 +82,6 @@ func NewProducerWithTracing(producer *kafka.Producer, opts ...Option) *Producer 
 
 func (p *Producer) listenEvents() {
 	for event := range p.Producer.Events() {
-		p.events <- event
 
 		switch ev := event.(type) {
 		case *kafka.Message:
@@ -109,11 +106,6 @@ func (p *Producer) listenEvents() {
 		}
 	}
 
-}
-
-// Events returns the channel events
-func (p *Producer) Events() chan kafka.Event {
-	return p.events
 }
 
 func (p *Producer) attrsByOperationAndMessage(operation internal.Operation, msg *kafka.Message) []attribute.KeyValue {
@@ -177,5 +169,4 @@ func (p *Producer) Produce(msg *kafka.Message, ctx context.Context, deliveryChan
 
 func (p *Producer) Close() {
 	p.Producer.Close()
-	close(p.events)
 }
